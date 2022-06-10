@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gnare <gnare@udel.edu>
+Date: Thu, 9 Jun 2022 21:36:16 -0400
+Subject: [PATCH] Migration of obfuscated blocks List from String to Block
+
+
+diff --git a/src/main/java/com/destroystokyo/paper/antixray/ChunkPacketBlockControllerAntiXray.java b/src/main/java/com/destroystokyo/paper/antixray/ChunkPacketBlockControllerAntiXray.java
+index a5d43901595f864c8a5dd5d013aa42d7f294e489..f9a6856f0264a9dc53eb4207b3761856d4707c26 100644
+--- a/src/main/java/com/destroystokyo/paper/antixray/ChunkPacketBlockControllerAntiXray.java
++++ b/src/main/java/com/destroystokyo/paper/antixray/ChunkPacketBlockControllerAntiXray.java
+@@ -62,7 +62,7 @@ public final class ChunkPacketBlockControllerAntiXray extends ChunkPacketBlockCo
+         maxBlockHeight = paperWorldConfig.maxBlockHeight >> 4 << 4;
+         updateRadius = paperWorldConfig.updateRadius;
+         usePermission = paperWorldConfig.usePermission;
+-        List<String> toObfuscate;
++        List<Block> toObfuscate;
+ 
+         if (engineMode == EngineMode.HIDE) {
+             toObfuscate = paperWorldConfig.hiddenBlocks;
+@@ -81,11 +81,10 @@ public final class ChunkPacketBlockControllerAntiXray extends ChunkPacketBlockCo
+             toObfuscate = new ArrayList<>(paperWorldConfig.replacementBlocks);
+             List<BlockState> presetBlockStateList = new LinkedList<>();
+ 
+-            for (String id : paperWorldConfig.hiddenBlocks) {
+-                Block block = Registry.BLOCK.getOptional(new ResourceLocation(id)).orElse(null);
++            for (Block block : paperWorldConfig.hiddenBlocks) {
+ 
+-                if (block != null && !(block instanceof EntityBlock)) {
+-                    toObfuscate.add(id);
++                if (!(block instanceof EntityBlock)) {
++                    toObfuscate.add(block);
+                     presetBlockStateList.add(block.defaultBlockState());
+                 }
+             }
+@@ -93,6 +92,7 @@ public final class ChunkPacketBlockControllerAntiXray extends ChunkPacketBlockCo
+             // The doc of the LinkedHashSet(Collection<? extends E>) constructor doesn't specify that the insertion order is the predictable iteration order of the specified Collection, although it is in the implementation
+             Set<BlockState> presetBlockStateSet = new LinkedHashSet<>();
+             // Therefore addAll(Collection<? extends E>) is used, which guarantees this order in the doc
++            //noinspection CollectionAddAllCanBeReplacedWithConstructor
+             presetBlockStateSet.addAll(presetBlockStateList);
+             presetBlockStates = presetBlockStateSet.isEmpty() ? new BlockState[]{Blocks.DIAMOND_ORE.defaultBlockState()} : presetBlockStateSet.toArray(new BlockState[0]);
+             presetBlockStatesFull = presetBlockStateSet.isEmpty() ? new BlockState[]{Blocks.DIAMOND_ORE.defaultBlockState()} : presetBlockStateList.toArray(new BlockState[0]);
+@@ -112,9 +112,7 @@ public final class ChunkPacketBlockControllerAntiXray extends ChunkPacketBlockCo
+             presetBlockStateBitsEndStoneGlobal = null;
+         }
+ 
+-        for (String id : toObfuscate) {
+-            Block block = Registry.BLOCK.getOptional(new ResourceLocation(id)).orElse(null);
+-
++        for (Block block : toObfuscate) {
+             // Don't obfuscate air because air causes unnecessary block updates and causes block updates to fail in the void
+             if (block != null && !block.defaultBlockState().isAir()) {
+                 // Replace all block states of a specified block
+@@ -130,12 +128,10 @@ public final class ChunkPacketBlockControllerAntiXray extends ChunkPacketBlockCo
+         for (int i = 0; i < solidGlobal.length; i++) {
+             BlockState blockState = GLOBAL_BLOCKSTATE_PALETTE.valueFor(i);
+ 
+-            if (blockState != null) {
+-                solidGlobal[i] = blockState.isRedstoneConductor(emptyChunk, zeroPos)
+-                    && blockState.getBlock() != Blocks.SPAWNER && blockState.getBlock() != Blocks.BARRIER && blockState.getBlock() != Blocks.SHULKER_BOX && blockState.getBlock() != Blocks.SLIME_BLOCK || paperWorldConfig.lavaObscures && blockState == Blocks.LAVA.defaultBlockState();
+-                // Comparing blockState == Blocks.LAVA.defaultBlockState() instead of blockState.getBlock() == Blocks.LAVA ensures that only "stationary lava" is used
+-                // shulker box checks TE.
+-            }
++            solidGlobal[i] = blockState.isRedstoneConductor(emptyChunk, zeroPos)
++                && blockState.getBlock() != Blocks.SPAWNER && blockState.getBlock() != Blocks.BARRIER && blockState.getBlock() != Blocks.SHULKER_BOX && blockState.getBlock() != Blocks.SLIME_BLOCK || paperWorldConfig.lavaObscures && blockState == Blocks.LAVA.defaultBlockState();
++            // Comparing blockState == Blocks.LAVA.defaultBlockState() instead of blockState.getBlock() == Blocks.LAVA ensures that only "stationary lava" is used
++            // shulker box checks TE.
+         }
+ 
+         maxBlockHeightUpdatePosition = maxBlockHeight + updateRadius - 1;
+diff --git a/src/main/java/io/papermc/paper/configuration/WorldConfiguration.java b/src/main/java/io/papermc/paper/configuration/WorldConfiguration.java
+index 5bcce63166657f80eaa8446d3dd64a5cba62f198..9148b9230360ca2bed38610592675eb4dab00c0c 100644
+--- a/src/main/java/io/papermc/paper/configuration/WorldConfiguration.java
++++ b/src/main/java/io/papermc/paper/configuration/WorldConfiguration.java
+@@ -32,6 +32,8 @@ import net.minecraft.world.entity.monster.Zombie;
+ import net.minecraft.world.item.Item;
+ import net.minecraft.world.item.Items;
+ import net.minecraft.world.level.NaturalSpawner;
++import net.minecraft.world.level.block.Block;
++import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.levelgen.feature.ConfiguredFeature;
+ import org.slf4j.Logger;
+ import org.spigotmc.SpigotWorldConfig;
+@@ -87,10 +89,10 @@ public class WorldConfiguration extends ConfigurationPart {
+             public int updateRadius = 2;
+             public boolean lavaObscures = false;
+             public boolean usePermission = false;
+-            public List<String> hiddenBlocks = List.of("copper_ore", "deepslate_copper_ore", "gold_ore", "deepslate_gold_ore", "iron_ore", "deepslate_iron_ore",
+-                "coal_ore", "deepslate_coal_ore", "lapis_ore", "deepslate_lapis_ore", "mossy_cobblestone", "obsidian", "chest", "diamond_ore", "deepslate_diamond_ore",
+-                "redstone_ore", "deepslate_redstone_ore", "clay", "emerald_ore", "deepslate_emerald_ore", "ender_chest"); // TODO update type to List<Block>
+-            public List<String> replacementBlocks = List.of("stone", "oak_planks", "deepslate"); // TODO update type to List<Block>
++            public List<Block> hiddenBlocks = List.of(Blocks.COPPER_ORE, Blocks.DEEPSLATE_COPPER_ORE, Blocks.GOLD_ORE, Blocks.DEEPSLATE_GOLD_ORE, Blocks.IRON_ORE, Blocks.DEEPSLATE_IRON_ORE,
++                Blocks.COAL_ORE, Blocks.DEEPSLATE_COAL_ORE, Blocks.LAPIS_ORE, Blocks.DEEPSLATE_LAPIS_ORE, Blocks.MOSSY_COBBLESTONE, Blocks.OBSIDIAN, Blocks.CHEST, Blocks.DIAMOND_ORE, Blocks.DEEPSLATE_DIAMOND_ORE,
++                Blocks.REDSTONE_ORE, Blocks.DEEPSLATE_REDSTONE_ORE, Blocks.CLAY, Blocks.EMERALD_ORE, Blocks.DEEPSLATE_EMERALD_ORE, Blocks.ENDER_CHEST);
++            public List<Block> replacementBlocks = List.of(Blocks.STONE, Blocks.OAK_PLANKS, Blocks.DEEPSLATE);
+         }
+     }
+ 
